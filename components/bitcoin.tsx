@@ -6,7 +6,9 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { AnimatePresence, motion } from "framer-motion";
 import { Repeat, Share2, TrendingDown, TrendingUp } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+let throttleTimeout;
 
 export default function BitcoinProfitCalculator() {
     const [mode, setMode] = useState("btc");
@@ -15,8 +17,8 @@ export default function BitcoinProfitCalculator() {
     const [buyPrice, setBuyPrice] = useState(95000);
     const [sellPrice, setSellPrice] = useState(99000);
     const [feePercent, setFeePercent] = useState(0.1);
-    const [result, setResult] = useState(null);
-    const [error, setError] = useState(null);
+    const [result, setResult] = useState<any>(null);
+    const [error, setError] = useState<any>(null);
 
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -71,23 +73,21 @@ export default function BitcoinProfitCalculator() {
         });
     };
 
-    const calculate = () => {
-        setError(null);
+    const throttledCalculate = useCallback(() => {
+        if (throttleTimeout) clearTimeout(throttleTimeout);
+        throttleTimeout = setTimeout(() => {
+            if (
+                (mode === "btc" && btcAmount > 0) ||
+                (mode === "usd" && usdAmount > 0)
+            ) {
+                calculateFromState({ mode, btcAmount, usdAmount, buyPrice, sellPrice, feePercent });
+            }
+        }, 400);
+    }, [mode, btcAmount, usdAmount, buyPrice, sellPrice, feePercent]);
 
-        if (
-            (mode === "btc" && btcAmount <= 0) ||
-            (mode === "usd" && usdAmount <= 0) ||
-            buyPrice <= 0 ||
-            sellPrice <= 0 ||
-            feePercent < 0
-        ) {
-            setError("Verifique se todos os valores são válidos e positivos.");
-            setResult(null);
-            return;
-        }
-
-        calculateFromState({ mode, btcAmount, usdAmount, buyPrice, sellPrice, feePercent });
-    };
+    useEffect(() => {
+        throttledCalculate();
+    }, [mode, btcAmount, usdAmount, buyPrice, sellPrice, feePercent, throttledCalculate]);
 
     const shareUrl = () => {
         const state = {
@@ -103,6 +103,7 @@ export default function BitcoinProfitCalculator() {
         navigator.clipboard.writeText(url).then(() => alert("Link copiado para área de transferência!"));
     };
 
+
     const swapPrices = () => {
         const temp = buyPrice;
         setBuyPrice(sellPrice);
@@ -112,7 +113,7 @@ export default function BitcoinProfitCalculator() {
     return (
         <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center px-4">
             <footer className="text-sm text-neutral-500 my-6 text-center">
-                Criado por <a href="https://www.linkedin.com/in/andersonbosa/" target="_blank" className="underline hover:text-white">Anderson Bosa</a>.
+                Criado por <a href="https://www.linkedin.com/in/andersonbosa/" target="_blank" className="underline hover:text-white">Anderson Bosa</a>
             </footer>
             <Card className="w-full max-w-2xl p-6 bg-neutral-900 border border-neutral-800 shadow-xl rounded-2xl">
                 <h2 className="text-2xl font-semibold mb-6 text-center">Calculadora de Lucro Bitcoin</h2>
@@ -208,7 +209,7 @@ export default function BitcoinProfitCalculator() {
 
                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6">
                     <Button
-                        onClick={calculate}
+                        onClick={throttledCalculate}
                         disabled={
                             mode === "btc"
                                 ? btcAmount <= 0

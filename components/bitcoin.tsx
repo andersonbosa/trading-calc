@@ -1,3 +1,5 @@
+'use client'
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -5,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { AnimatePresence, motion } from "framer-motion";
 import { Repeat, Share2, TrendingDown, TrendingUp } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 let throttleTimeout;
@@ -18,9 +20,7 @@ export default function BitcoinProfitCalculator() {
     const [sellPrice, setSellPrice] = useState(99000);
     const [feePercent, setFeePercent] = useState(0.1);
     const [result, setResult] = useState<any>(null);
-    const [error, setError] = useState<any>(null);
 
-    const router = useRouter();
     const searchParams = useSearchParams();
 
     useEffect(() => {
@@ -111,7 +111,7 @@ export default function BitcoinProfitCalculator() {
     };
 
     return (
-        <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center px-4">
+        <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center px-4 pb-4">
             <footer className="text-sm text-neutral-500 my-6 text-center">
                 Criado por <a href="https://www.linkedin.com/in/andersonbosa/" target="_blank" className="underline hover:text-white">Anderson Bosa</a>
             </footer>
@@ -222,10 +222,6 @@ export default function BitcoinProfitCalculator() {
                         <Share2 className="w-4 h-4" /> Compartilhar
                     </Button>
                 </div>
-
-                {error && (
-                    <p className="mt-4 text-sm text-red-400 text-center">{error}</p>
-                )}
 
                 <AnimatePresence>
                     {result && (

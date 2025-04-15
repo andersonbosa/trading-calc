@@ -1,56 +1,61 @@
-'use client'
-
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { AnimatePresence, motion } from "framer-motion"
-import { AlertCircle, TrendingDown, TrendingUp } from "lucide-react"
-import { useState } from "react"
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { AnimatePresence, motion } from "framer-motion";
+import { Repeat, Share2, TrendingDown, TrendingUp } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function BitcoinProfitCalculator() {
-    const [mode, setMode] = useState("btc")
-    const [btcAmount, setBtcAmount] = useState(0.1)
-    const [usdAmount, setUsdAmount] = useState(1000)
-    const [buyPrice, setBuyPrice] = useState(74000)
-    const [sellPrice, setSellPrice] = useState(84000)
-    const [feePercent, setFeePercent] = useState(0.1)
-    const [result, setResult] = useState<any>(null)
-    const [error, setError] = useState<any>(null)
+    const [mode, setMode] = useState("btc");
+    const [btcAmount, setBtcAmount] = useState(0.1);
+    const [usdAmount, setUsdAmount] = useState(1000);
+    const [buyPrice, setBuyPrice] = useState(95000);
+    const [sellPrice, setSellPrice] = useState(99000);
+    const [feePercent, setFeePercent] = useState(0.1);
+    const [result, setResult] = useState(null);
+    const [error, setError] = useState(null);
 
-    const calculate = () => {
-        setError(null)
+    const router = useRouter();
+    const searchParams = useSearchParams();
 
-        if (
-            (mode === "btc" && btcAmount <= 0) ||
-            (mode === "usd" && usdAmount <= 0) ||
-            buyPrice <= 0 ||
-            sellPrice <= 0 ||
-            feePercent < 0
-        ) {
-            setError("Verifique se todos os valores são válidos e positivos.")
-            setResult(null)
-            return
+    useEffect(() => {
+        const shared = searchParams.get("share");
+        if (shared) {
+            try {
+                const decoded = JSON.parse(atob(shared));
+                setMode(decoded.mode);
+                setBtcAmount(decoded.btcAmount);
+                setUsdAmount(decoded.usdAmount);
+                setBuyPrice(decoded.buyPrice);
+                setSellPrice(decoded.sellPrice);
+                setFeePercent(decoded.feePercent);
+                calculateFromState(decoded);
+            } catch (err) {
+                console.error("Erro ao decodificar URL compartilhada", err);
+            }
         }
+    }, []);
 
+    const calculateFromState = (state) => {
         const amountBtc =
-            mode === "btc"
-                ? btcAmount
-                : (usdAmount / buyPrice) * (1 - feePercent * 0.01)
+            state.mode === "btc"
+                ? state.btcAmount
+                : (state.usdAmount / state.buyPrice) * (1 - state.feePercent * 0.01);
 
-        const buyValue = amountBtc * buyPrice
-        const buyFee = buyValue * (feePercent * 0.01)
-        const buyTotal = buyValue + buyFee
+        const buyValue = amountBtc * state.buyPrice;
+        const buyFee = buyValue * (state.feePercent * 0.01);
+        const buyTotal = buyValue + buyFee;
 
-        const sellValue = amountBtc * sellPrice
-        const sellFee = sellValue * (feePercent * 0.01)
-        const sellNet = sellValue - sellFee
+        const sellValue = amountBtc * state.sellPrice;
+        const sellFee = sellValue * (state.feePercent * 0.01);
+        const sellNet = sellValue - sellFee;
 
-        const profitGross = sellValue - buyValue
-        const profitNet = sellNet - buyTotal
-        const returnOnInvestment = (profitNet / buyTotal) * 100
+        const profitGross = sellValue - buyValue;
+        const profitNet = sellNet - buyTotal;
+        const returnOnInvestment = (profitNet / buyTotal) * 100;
 
         setResult({
             btc: amountBtc,
@@ -63,11 +68,52 @@ export default function BitcoinProfitCalculator() {
             profitGross,
             profitNet,
             returnOnInvestment,
-        })
-    }
+        });
+    };
+
+    const calculate = () => {
+        setError(null);
+
+        if (
+            (mode === "btc" && btcAmount <= 0) ||
+            (mode === "usd" && usdAmount <= 0) ||
+            buyPrice <= 0 ||
+            sellPrice <= 0 ||
+            feePercent < 0
+        ) {
+            setError("Verifique se todos os valores são válidos e positivos.");
+            setResult(null);
+            return;
+        }
+
+        calculateFromState({ mode, btcAmount, usdAmount, buyPrice, sellPrice, feePercent });
+    };
+
+    const shareUrl = () => {
+        const state = {
+            mode,
+            btcAmount,
+            usdAmount,
+            buyPrice,
+            sellPrice,
+            feePercent,
+        };
+        const encoded = btoa(JSON.stringify(state));
+        const url = `${window.location.origin}${window.location.pathname}?share=${encoded}`;
+        navigator.clipboard.writeText(url).then(() => alert("Link copiado para área de transferência!"));
+    };
+
+    const swapPrices = () => {
+        const temp = buyPrice;
+        setBuyPrice(sellPrice);
+        setSellPrice(temp);
+    };
 
     return (
-        <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center p-4">
+        <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center px-4">
+            <footer className="text-sm text-neutral-500 my-6 text-center">
+                Criado por <a href="https://www.linkedin.com/in/andersonbosa/" target="_blank" className="underline hover:text-white">Anderson Bosa</a>.
+            </footer>
             <Card className="w-full max-w-2xl p-6 bg-neutral-900 border border-neutral-800 shadow-xl rounded-2xl">
                 <h2 className="text-2xl font-semibold mb-6 text-center">Calculadora de Lucro Bitcoin</h2>
 
@@ -78,24 +124,18 @@ export default function BitcoinProfitCalculator() {
                 >
                     <div className="flex items-center space-x-2">
                         <RadioGroupItem value="btc" id="r1" />
-                        <Label htmlFor="r1">Calcular com BTC</Label>
+                        <Label htmlFor="r1">Valor Inicial em BTC</Label>
                     </div>
                     <div className="flex items-center space-x-2">
                         <RadioGroupItem value="usd" id="r2" />
-                        <Label htmlFor="r2">Calcular com USD</Label>
+                        <Label htmlFor="r2">Valor Inicial em USD</Label>
                     </div>
                 </RadioGroup>
 
                 <div className="grid gap-4">
                     {mode === "btc" ? (
                         <div>
-                            <Label className="flex items-center gap-2">
-                                Quantidade de BTC
-                                <Tooltip>
-                                    <TooltipTrigger><AlertCircle className="w-4 h-4" /></TooltipTrigger>
-                                    <TooltipContent>Quantidade que você já possui para vender</TooltipContent>
-                                </Tooltip>
-                            </Label>
+                            <Label>Valor Inicial em BTC</Label>
                             <Input
                                 placeholder="Ex: 0.015"
                                 type="number"
@@ -104,16 +144,13 @@ export default function BitcoinProfitCalculator() {
                                 min={0}
                                 step={0.00001}
                             />
+                            <p className="text-xs text-neutral-400 mt-1">
+                                Você já possui essa quantidade de BTC e quer simular uma venda.
+                            </p>
                         </div>
                     ) : (
                         <div>
-                            <Label className="flex items-center gap-2">
-                                Valor em USD para comprar BTC
-                                <Tooltip>
-                                    <TooltipTrigger><AlertCircle className="w-4 h-4" /></TooltipTrigger>
-                                    <TooltipContent>Quanto você quer investir para comprar BTC</TooltipContent>
-                                </Tooltip>
-                            </Label>
+                            <Label>Valor Inicial em USD</Label>
                             <Input
                                 placeholder="Ex: 1500"
                                 type="number"
@@ -121,29 +158,41 @@ export default function BitcoinProfitCalculator() {
                                 onChange={(e) => setUsdAmount(parseFloat(e.target.value))}
                                 min={0}
                             />
+                            <p className="text-xs text-neutral-400 mt-1">
+                                Você comprará BTC com esse valor e simulará a venda.
+                            </p>
                         </div>
                     )}
 
-                    <div>
-                        <Label>Preço de Compra (USD)</Label>
-                        <Input
-                            placeholder="Ex: 95000"
-                            type="number"
-                            value={buyPrice}
-                            onChange={(e) => setBuyPrice(parseFloat(e.target.value))}
-                            min={0}
-                        />
+                    <div className="grid grid-cols-2 gap-4 items-end">
+                        <div>
+                            <Label>Preço de Compra (USD)</Label>
+                            <Input
+                                placeholder="Ex: 95000"
+                                type="number"
+                                value={buyPrice}
+                                onChange={(e) => setBuyPrice(parseFloat(e.target.value))}
+                                min={0}
+                            />
+                        </div>
+                        <div>
+                            <Label>Preço de Venda (USD)</Label>
+                            <Input
+                                placeholder="Ex: 99000"
+                                type="number"
+                                value={sellPrice}
+                                onChange={(e) => setSellPrice(parseFloat(e.target.value))}
+                                min={0}
+                            />
+                        </div>
                     </div>
-                    <div>
-                        <Label>Preço de Venda (USD)</Label>
-                        <Input
-                            placeholder="Ex: 99000"
-                            type="number"
-                            value={sellPrice}
-                            onChange={(e) => setSellPrice(parseFloat(e.target.value))}
-                            min={0}
-                        />
+
+                    <div className="flex justify-center">
+                        <Button variant="ghost" size="sm" onClick={swapPrices} className="text-neutral-400 hover:text-white flex items-center gap-1">
+                            <Repeat className="w-4 h-4" /> Inverter preços
+                        </Button>
                     </div>
+
                     <div>
                         <Label>Taxa da Corretora (%)</Label>
                         <Input
@@ -157,17 +206,21 @@ export default function BitcoinProfitCalculator() {
                     </div>
                 </div>
 
-                <Button
-                    onClick={calculate}
-                    className="w-full mt-6"
-                    disabled={
-                        mode === "btc"
-                            ? btcAmount <= 0
-                            : usdAmount <= 0 || buyPrice <= 0 || sellPrice <= 0
-                    }
-                >
-                    Calcular Lucro
-                </Button>
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6">
+                    <Button
+                        onClick={calculate}
+                        disabled={
+                            mode === "btc"
+                                ? btcAmount <= 0
+                                : usdAmount <= 0 || buyPrice <= 0 || sellPrice <= 0
+                        }
+                    >
+                        Calcular Lucro
+                    </Button>
+                    <Button variant="secondary" onClick={shareUrl} className="flex items-center gap-2">
+                        <Share2 className="w-4 h-4" /> Compartilhar
+                    </Button>
+                </div>
 
                 {error && (
                     <p className="mt-4 text-sm text-red-400 text-center">{error}</p>
@@ -210,6 +263,8 @@ export default function BitcoinProfitCalculator() {
                     )}
                 </AnimatePresence>
             </Card>
+
+
         </div>
-    )
+    );
 }

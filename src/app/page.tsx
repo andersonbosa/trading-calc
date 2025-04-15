@@ -1,3 +1,4 @@
+'use client'
 
 import BitcoinProfitCalculator from "../../components/bitcoin";
 

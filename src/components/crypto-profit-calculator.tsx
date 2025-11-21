@@ -12,8 +12,9 @@ import { useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 interface CalculatorState {
-    mode: "crypto" | "usd" | "btc" // "btc" para compatibilidade
-    cryptoAmount?: number
+    mode: "quantity" | "usd" | "crypto" | "btc" // "crypto" e "btc" para compatibilidade
+    quantity?: number // Quantidade do ativo
+    cryptoAmount?: number // Compatibilidade
     usdAmount: number
     buyPrice: number
     sellPrice: number
@@ -26,7 +27,7 @@ interface CalculatorState {
 }
 
 interface CalculationResult {
-    cryptoAmount: number
+    quantity: number
     buyValue: number
     buyFee: number
     buyTotal: number
@@ -37,6 +38,7 @@ interface CalculationResult {
     profitNet: number
     returnOnInvestment: number
     // Compatibilidade
+    cryptoAmount?: number
     btc?: number
 }
 
@@ -45,11 +47,11 @@ interface HistoryEntry extends CalculatorState {
     timestamp: number
 }
 
-const STORAGE_KEY = 'crypto-calc-state'
+const STORAGE_KEY = 'profit-calc-state'
 
-export function CryptoProfitCalculator() {
-    const [mode, setMode] = useState<"crypto" | "usd">("crypto")
-    const [cryptoAmount, setCryptoAmount] = useState(0.1)
+export function ProfitCalculator() {
+    const [mode, setMode] = useState<"quantity" | "usd">("quantity")
+    const [quantity, setQuantity] = useState(0.1)
     const [usdAmount, setUsdAmount] = useState(1000)
     const [buyPrice, setBuyPrice] = useState(95000)
     const [sellPrice, setSellPrice] = useState(99000)
@@ -77,10 +79,10 @@ export function CryptoProfitCalculator() {
         return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
     }
 
-    const formatCrypto = (value: number) => {
+    const formatQuantity = (value: number) => {
         // Ajustar casas decimais baseado no valor
         const decimals = value < 0.01 ? 8 : value < 1 ? 6 : 4
-        return `${value.toFixed(decimals)} crypto`
+        return value.toFixed(decimals)
     }
 
     // Carregar estados salvos do localStorage na inicialização
@@ -89,8 +91,12 @@ export function CryptoProfitCalculator() {
         if (savedState) {
             try {
                 const parsed = JSON.parse(savedState)
-                if (parsed.mode) setMode(parsed.mode === "btc" ? "crypto" : parsed.mode)
-                if (parsed.cryptoAmount !== undefined) setCryptoAmount(parsed.cryptoAmount)
+                // Migrar modos antigos para o novo formato
+                const normalizedMode = parsed.mode === "btc" || parsed.mode === "crypto" ? "quantity" : parsed.mode || "quantity"
+                setMode(normalizedMode)
+                // Suportar tanto quantity quanto cryptoAmount/btcAmount para compatibilidade
+                const qty = parsed.quantity ?? parsed.cryptoAmount ?? parsed.btcAmount ?? 0.1
+                setQuantity(qty)
                 if (parsed.usdAmount !== undefined) setUsdAmount(parsed.usdAmount)
                 if (parsed.buyPrice !== undefined) setBuyPrice(parsed.buyPrice)
                 if (parsed.sellPrice !== undefined) setSellPrice(parsed.sellPrice)
@@ -109,7 +115,7 @@ export function CryptoProfitCalculator() {
         
         const stateToSave = {
             mode,
-            cryptoAmount,
+            quantity,
             usdAmount,
             buyPrice,
             sellPrice,
@@ -117,7 +123,7 @@ export function CryptoProfitCalculator() {
             sellFeePercent,
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave))
-    }, [isInitialized, mode, cryptoAmount, usdAmount, buyPrice, sellPrice, buyFeePercent, sellFeePercent])
+    }, [isInitialized, mode, quantity, usdAmount, buyPrice, sellPrice, buyFeePercent, sellFeePercent])
 
     // Carregar histórico do localStorage
     useEffect(() => {
@@ -128,8 +134,9 @@ export function CryptoProfitCalculator() {
                 // Migrar histórico antigo
                 const migrated = parsed.map((entry: any) => ({
                     ...entry,
-                    cryptoAmount: entry.cryptoAmount ?? entry.btcAmount ?? 0,
-                    mode: entry.mode === "btc" ? "crypto" : entry.mode,
+                    quantity: entry.quantity ?? entry.cryptoAmount ?? entry.btcAmount ?? 0,
+                    cryptoAmount: entry.quantity ?? entry.cryptoAmount ?? entry.btcAmount ?? 0, // Compatibilidade
+                    mode: entry.mode === "btc" || entry.mode === "crypto" ? "quantity" : entry.mode || "quantity",
                 }))
                 setHistory(migrated)
             } catch (err) {
@@ -146,16 +153,18 @@ export function CryptoProfitCalculator() {
     }, [history])
 
     const calculateFromState = useCallback((state: CalculatorState) => {
-        const amountCrypto =
-            state.mode === "crypto" || state.mode === "btc"
-                ? (state.cryptoAmount ?? state.btcAmount ?? 0)
+        // Suportar modos antigos e novo modo
+        const isQuantityMode = state.mode === "quantity" || state.mode === "crypto" || state.mode === "btc"
+        const amount =
+            isQuantityMode
+                ? (state.quantity ?? state.cryptoAmount ?? state.btcAmount ?? 0)
                 : (state.usdAmount / state.buyPrice) * (1 - (state.buyFeePercent ?? 0.1) * 0.01)
 
-        const buyValue = amountCrypto * state.buyPrice
+        const buyValue = amount * state.buyPrice
         const buyFee = buyValue * ((state.buyFeePercent ?? state.feePercent ?? 0.1) * 0.01)
         const buyTotal = buyValue + buyFee
 
-        const sellValue = amountCrypto * state.sellPrice
+        const sellValue = amount * state.sellPrice
         const sellFee = sellValue * ((state.sellFeePercent ?? state.feePercent ?? 0.1) * 0.01)
         const sellNet = sellValue - sellFee
 
@@ -164,8 +173,9 @@ export function CryptoProfitCalculator() {
         const returnOnInvestment = buyTotal > 0 ? (profitNet / buyTotal) * 100 : 0
 
         const calculationResult: CalculationResult = {
-            cryptoAmount: amountCrypto,
-            btc: amountCrypto, // Compatibilidade
+            quantity: amount,
+            cryptoAmount: amount, // Compatibilidade
+            btc: amount, // Compatibilidade
             buyValue,
             buyFee,
             buyTotal,
@@ -187,13 +197,15 @@ export function CryptoProfitCalculator() {
         if (shared) {
             try {
                 const decoded: CalculatorState = JSON.parse(atob(shared))
+                const normalizedMode = decoded.mode === "btc" || decoded.mode === "crypto" ? "quantity" : decoded.mode || "quantity"
                 const normalizedState: CalculatorState = {
                     ...decoded,
-                    cryptoAmount: decoded.cryptoAmount ?? decoded.btcAmount ?? 0.1,
-                    mode: decoded.mode === "btc" ? "crypto" : decoded.mode || "crypto",
+                    mode: normalizedMode,
+                    quantity: decoded.quantity ?? decoded.cryptoAmount ?? decoded.btcAmount ?? 0.1,
+                    cryptoAmount: decoded.quantity ?? decoded.cryptoAmount ?? decoded.btcAmount ?? 0.1, // Compatibilidade
                 }
-                setMode(normalizedState.mode === "btc" ? "crypto" : normalizedState.mode)
-                setCryptoAmount(normalizedState.cryptoAmount ?? 0.1)
+                setMode(normalizedMode)
+                setQuantity(normalizedState.quantity ?? 0.1)
                 setUsdAmount(normalizedState.usdAmount)
                 setBuyPrice(normalizedState.buyPrice)
                 setSellPrice(normalizedState.sellPrice)
@@ -215,12 +227,13 @@ export function CryptoProfitCalculator() {
             const isValid =
                 buyPrice > 0 &&
                 sellPrice > 0 &&
-                ((mode === "crypto" && cryptoAmount > 0) || (mode === "usd" && usdAmount > 0))
+                ((mode === "quantity" && quantity > 0) || (mode === "usd" && usdAmount > 0))
 
             if (isValid) {
                 const state: CalculatorState = {
                     mode,
-                    cryptoAmount,
+                    quantity,
+                    cryptoAmount: quantity, // Compatibilidade
                     usdAmount,
                     buyPrice,
                     sellPrice,
@@ -242,7 +255,7 @@ export function CryptoProfitCalculator() {
                 setResult(null)
             }
         }, 300)
-    }, [mode, cryptoAmount, usdAmount, buyPrice, sellPrice, buyFeePercent, sellFeePercent, calculateFromState])
+    }, [mode, quantity, usdAmount, buyPrice, sellPrice, buyFeePercent, sellFeePercent, calculateFromState])
 
     useEffect(() => {
         throttledCalculate()
@@ -256,7 +269,8 @@ export function CryptoProfitCalculator() {
     const shareUrl = () => {
         const state: CalculatorState = {
             mode,
-            cryptoAmount,
+            quantity,
+            cryptoAmount: quantity, // Compatibilidade
             usdAmount,
             buyPrice,
             sellPrice,
@@ -283,8 +297,10 @@ export function CryptoProfitCalculator() {
     }
 
     const loadFromHistory = (entry: HistoryEntry) => {
-        setMode(entry.mode === "btc" ? "crypto" : entry.mode)
-        setCryptoAmount(entry.cryptoAmount ?? entry.btcAmount ?? 0)
+        const normalizedMode = entry.mode === "btc" || entry.mode === "crypto" ? "quantity" : entry.mode || "quantity"
+        setMode(normalizedMode)
+        const qty = entry.quantity ?? entry.cryptoAmount ?? entry.btcAmount ?? 0
+        setQuantity(qty)
         setUsdAmount(entry.usdAmount)
         setBuyPrice(entry.buyPrice)
         setSellPrice(entry.sellPrice)
@@ -303,9 +319,9 @@ export function CryptoProfitCalculator() {
         return (
             buyPrice > 0 &&
             sellPrice > 0 &&
-            ((mode === "crypto" && cryptoAmount > 0) || (mode === "usd" && usdAmount > 0))
+            ((mode === "quantity" && quantity > 0) || (mode === "usd" && usdAmount > 0))
         )
-    }, [mode, cryptoAmount, usdAmount, buyPrice, sellPrice])
+    }, [mode, quantity, usdAmount, buyPrice, sellPrice])
 
     return (
         <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center px-4 pb-4">
@@ -314,7 +330,7 @@ export function CryptoProfitCalculator() {
             </footer>
             <Card className="w-full max-w-2xl p-6 bg-neutral-900 border border-neutral-800 shadow-xl rounded-2xl">
                 <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-2xl font-semibold">Calculadora de Lucro Criptomoedas</h2>
+                    <h2 className="text-2xl font-semibold">Calculadora de Lucro/Prejuízo</h2>
                     {history.length > 0 && (
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -362,8 +378,8 @@ export function CryptoProfitCalculator() {
                                     >
                                         <div className="flex items-center justify-between">
                                             <span className="text-neutral-300">
-                                                {entry.mode === "crypto" || entry.mode === "btc" 
-                                                    ? `${(entry.cryptoAmount ?? entry.btcAmount ?? 0).toFixed(4)} crypto`
+                                                {entry.mode === "quantity" || entry.mode === "crypto" || entry.mode === "btc" 
+                                                    ? `${(entry.quantity ?? entry.cryptoAmount ?? entry.btcAmount ?? 0).toFixed(4)} unidades`
                                                     : formatCurrency(entry.usdAmount)}
                                             </span>
                                             <span className={entry.result.profitNet >= 0 ? "text-green-400" : "text-red-400"}>
@@ -382,38 +398,38 @@ export function CryptoProfitCalculator() {
 
                 <RadioGroup
                     value={mode}
-                    onValueChange={(value) => setMode(value as "crypto" | "usd")}
+                    onValueChange={(value) => setMode(value as "quantity" | "usd")}
                     className="flex justify-center gap-6 mb-6"
                 >
                     <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="crypto" id="r1" />
-                        <Label htmlFor="r1">Valor Inicial em Crypto</Label>
+                        <RadioGroupItem value="quantity" id="r1" />
+                        <Label htmlFor="r1">Quantidade do Ativo</Label>
                     </div>
                     <div className="flex items-center space-x-2">
                         <RadioGroupItem value="usd" id="r2" />
-                        <Label htmlFor="r2">Valor Inicial em USD</Label>
+                        <Label htmlFor="r2">Valor em USD</Label>
                     </div>
                 </RadioGroup>
 
                 <div className="grid gap-4">
-                    {mode === "crypto" ? (
+                    {mode === "quantity" ? (
                         <div>
                             <div className="flex items-center gap-2 mb-2">
-                                <Label>Valor Inicial em Crypto</Label>
+                                <Label>Quantidade do Ativo</Label>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <HelpCircle className="w-3 h-3 text-neutral-400 cursor-help" />
                                     </TooltipTrigger>
                                     <TooltipContent>
-                                        Você já possui essa quantidade de crypto e quer simular uma venda.
+                                        Você já possui essa quantidade do ativo e quer simular uma venda.
                                     </TooltipContent>
                                 </Tooltip>
                             </div>
                             <Input
-                                placeholder="Ex: 0.015"
+                                placeholder="Ex: 0.015 ou 100"
                                 type="number"
-                                value={cryptoAmount || ""}
-                                onChange={(e) => setCryptoAmount(parseFloat(e.target.value) || 0)}
+                                value={quantity || ""}
+                                onChange={(e) => setQuantity(parseFloat(e.target.value) || 0)}
                                 min={0}
                                 step={0.00001}
                                 className="bg-neutral-800 border-neutral-700"
@@ -422,13 +438,13 @@ export function CryptoProfitCalculator() {
                     ) : (
                         <div>
                             <div className="flex items-center gap-2 mb-2">
-                                <Label>Valor Inicial em USD</Label>
+                                <Label>Valor em USD</Label>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <HelpCircle className="w-3 h-3 text-neutral-400 cursor-help" />
                                     </TooltipTrigger>
                                     <TooltipContent>
-                                        Você comprará crypto com esse valor e simulará a venda.
+                                        Você comprará o ativo com esse valor e simulará a venda.
                                     </TooltipContent>
                                 </Tooltip>
                             </div>
@@ -486,7 +502,7 @@ export function CryptoProfitCalculator() {
                                         <HelpCircle className="w-3 h-3 text-neutral-400 cursor-help" />
                                     </TooltipTrigger>
                                     <TooltipContent>
-                                        Taxa cobrada pela corretora na compra de crypto.
+                                        Taxa cobrada pela corretora na compra do ativo.
                                     </TooltipContent>
                                 </Tooltip>
                             </div>
@@ -508,7 +524,7 @@ export function CryptoProfitCalculator() {
                                         <HelpCircle className="w-3 h-3 text-neutral-400 cursor-help" />
                                     </TooltipTrigger>
                                     <TooltipContent>
-                                        Taxa cobrada pela corretora na venda de crypto.
+                                        Taxa cobrada pela corretora na venda do ativo.
                                     </TooltipContent>
                                 </Tooltip>
                             </div>
@@ -562,8 +578,8 @@ export function CryptoProfitCalculator() {
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-3 border-t pt-4 border-neutral-700">
-                                    <span className="text-neutral-400">Crypto negociado:</span>
-                                    <span className="font-medium">{formatCrypto(result.cryptoAmount)}</span>
+                                    <span className="text-neutral-400">Quantidade negociada:</span>
+                                    <span className="font-medium">{formatQuantity(result.quantity)} unidades</span>
 
                                     <span className="text-neutral-400">Valor de compra:</span>
                                     <span>{formatCurrency(result.buyValue)}</span>

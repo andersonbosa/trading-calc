@@ -61,15 +61,43 @@ export function ProfitCalculator() {
     const [history, setHistory] = useState<HistoryEntry[]>([])
     const [showHistory, setShowHistory] = useState(false)
     const [isInitialized, setIsInitialized] = useState(false)
+    const [usdToBrl, setUsdToBrl] = useState<number | null>(null)
 
     const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null)
     const searchParams = useSearchParams()
+
+    // Buscar cotação do dólar
+    useEffect(() => {
+        const fetchExchangeRate = async () => {
+            try {
+                const response = await fetch('https://cdn.moneyconvert.net/api/latest.json')
+                const data = await response.json()
+                if (data.rates && data.rates.BRL) {
+                    setUsdToBrl(data.rates.BRL)
+                }
+            } catch (error) {
+                console.error('Erro ao buscar cotação do dólar:', error)
+                // Fallback para uma cotação padrão caso a API falhe
+                setUsdToBrl(5.0)
+            }
+        }
+        fetchExchangeRate()
+    }, [])
 
     // Formatação de números
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('pt-BR', {
             style: 'currency',
             currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }).format(value)
+    }
+
+    const formatCurrencyBRL = (value: number) => {
+        return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
         }).format(value)
@@ -563,16 +591,35 @@ export function ProfitCalculator() {
                             transition={{ duration: 0.3 }}
                         >
                             <CardContent className="mt-8 space-y-4 text-sm bg-neutral-800 rounded-lg p-6 border border-neutral-700">
+                                {usdToBrl && (
+                                    <div className="text-xs text-neutral-500 text-center mb-2">
+                                        Cotação USD/BRL: {usdToBrl.toFixed(4)}
+                                    </div>
+                                )}
                                 <div className="text-center text-2xl font-semibold mb-4">
                                     {result.profitNet >= 0 ? (
-                                        <div className="text-green-400 flex items-center justify-center gap-2">
-                                            <TrendingUp className="w-6 h-6" />
-                                            {formatCurrency(result.profitNet)} de lucro líquido
+                                        <div className="text-green-400 flex flex-col items-center justify-center gap-1">
+                                            <div className="flex items-center gap-2">
+                                                <TrendingUp className="w-6 h-6" />
+                                                {formatCurrency(result.profitNet)} de lucro líquido
+                                            </div>
+                                            {usdToBrl && (
+                                                <div className="text-lg text-neutral-400">
+                                                    {formatCurrencyBRL(result.profitNet * usdToBrl)}
+                                                </div>
+                                            )}
                                         </div>
                                     ) : (
-                                        <div className="text-red-400 flex items-center justify-center gap-2">
-                                            <TrendingDown className="w-6 h-6" />
-                                            {formatCurrency(result.profitNet)} de prejuízo
+                                        <div className="text-red-400 flex flex-col items-center justify-center gap-1">
+                                            <div className="flex items-center gap-2">
+                                                <TrendingDown className="w-6 h-6" />
+                                                {formatCurrency(result.profitNet)} de prejuízo
+                                            </div>
+                                            {usdToBrl && (
+                                                <div className="text-lg text-neutral-400">
+                                                    {formatCurrencyBRL(result.profitNet * usdToBrl)}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -582,27 +629,64 @@ export function ProfitCalculator() {
                                     <span className="font-medium">{formatQuantity(result.quantity)} unidades</span>
 
                                     <span className="text-neutral-400">Valor de compra:</span>
-                                    <span>{formatCurrency(result.buyValue)}</span>
+                                    <div className="flex flex-col">
+                                        <span>{formatCurrency(result.buyValue)}</span>
+                                        {usdToBrl && (
+                                            <span className="text-xs text-neutral-500">{formatCurrencyBRL(result.buyValue * usdToBrl)}</span>
+                                        )}
+                                    </div>
 
                                     <span className="text-neutral-400">Taxa de compra:</span>
-                                    <span className="text-red-400">-{formatCurrency(result.buyFee)}</span>
+                                    <div className="flex flex-col">
+                                        <span className="text-red-400">-{formatCurrency(result.buyFee)}</span>
+                                        {usdToBrl && (
+                                            <span className="text-xs text-neutral-500 text-red-400">-{formatCurrencyBRL(result.buyFee * usdToBrl)}</span>
+                                        )}
+                                    </div>
 
                                     <span className="text-neutral-400">Total investido:</span>
-                                    <span className="font-semibold">{formatCurrency(result.buyTotal)}</span>
+                                    <div className="flex flex-col">
+                                        <span className="font-semibold">{formatCurrency(result.buyTotal)}</span>
+                                        {usdToBrl && (
+                                            <span className="text-xs text-neutral-500 font-semibold">{formatCurrencyBRL(result.buyTotal * usdToBrl)}</span>
+                                        )}
+                                    </div>
 
                                     <span className="text-neutral-400">Valor de venda:</span>
-                                    <span>{formatCurrency(result.sellValue)}</span>
+                                    <div className="flex flex-col">
+                                        <span>{formatCurrency(result.sellValue)}</span>
+                                        {usdToBrl && (
+                                            <span className="text-xs text-neutral-500">{formatCurrencyBRL(result.sellValue * usdToBrl)}</span>
+                                        )}
+                                    </div>
 
                                     <span className="text-neutral-400">Taxa de venda:</span>
-                                    <span className="text-red-400">-{formatCurrency(result.sellFee)}</span>
+                                    <div className="flex flex-col">
+                                        <span className="text-red-400">-{formatCurrency(result.sellFee)}</span>
+                                        {usdToBrl && (
+                                            <span className="text-xs text-neutral-500 text-red-400">-{formatCurrencyBRL(result.sellFee * usdToBrl)}</span>
+                                        )}
+                                    </div>
 
                                     <span className="text-neutral-400">Receita líquida:</span>
-                                    <span className="font-semibold">{formatCurrency(result.sellNet)}</span>
+                                    <div className="flex flex-col">
+                                        <span className="font-semibold">{formatCurrency(result.sellNet)}</span>
+                                        {usdToBrl && (
+                                            <span className="text-xs text-neutral-500 font-semibold">{formatCurrencyBRL(result.sellNet * usdToBrl)}</span>
+                                        )}
+                                    </div>
 
                                     <span className="text-neutral-400">Lucro bruto:</span>
-                                    <span className={result.profitGross >= 0 ? "text-green-400" : "text-red-400"}>
-                                        {formatCurrency(result.profitGross)}
-                                    </span>
+                                    <div className="flex flex-col">
+                                        <span className={result.profitGross >= 0 ? "text-green-400" : "text-red-400"}>
+                                            {formatCurrency(result.profitGross)}
+                                        </span>
+                                        {usdToBrl && (
+                                            <span className={`text-xs text-neutral-500 ${result.profitGross >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                                {formatCurrencyBRL(result.profitGross * usdToBrl)}
+                                            </span>
+                                        )}
+                                    </div>
 
                                     <span className="text-neutral-400">ROI:</span>
                                     <span className={`font-semibold ${result.returnOnInvestment >= 0 ? "text-green-400" : "text-red-400"}`}>

@@ -1,0 +1,603 @@
+'use client'
+
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AnimatePresence, motion } from "framer-motion"
+import { HelpCircle, History, Repeat, Share2, TrendingDown, TrendingUp } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+
+interface CalculatorState {
+    mode: "crypto" | "usd" | "btc" // "btc" para compatibilidade
+    cryptoAmount?: number
+    usdAmount: number
+    buyPrice: number
+    sellPrice: number
+    buyFeePercent?: number
+    sellFeePercent?: number
+    // Compatibilidade com versões antigas
+    btcAmount?: number
+    feePercent?: number
+    cryptoName?: string // Mantido apenas para compatibilidade
+}
+
+interface CalculationResult {
+    cryptoAmount: number
+    buyValue: number
+    buyFee: number
+    buyTotal: number
+    sellValue: number
+    sellFee: number
+    sellNet: number
+    profitGross: number
+    profitNet: number
+    returnOnInvestment: number
+    // Compatibilidade
+    btc?: number
+}
+
+interface HistoryEntry extends CalculatorState {
+    result: CalculationResult
+    timestamp: number
+}
+
+const STORAGE_KEY = 'crypto-calc-state'
+
+export function CryptoProfitCalculator() {
+    const [mode, setMode] = useState<"crypto" | "usd">("crypto")
+    const [cryptoAmount, setCryptoAmount] = useState(0.1)
+    const [usdAmount, setUsdAmount] = useState(1000)
+    const [buyPrice, setBuyPrice] = useState(95000)
+    const [sellPrice, setSellPrice] = useState(99000)
+    const [buyFeePercent, setBuyFeePercent] = useState(0.1)
+    const [sellFeePercent, setSellFeePercent] = useState(0.1)
+    const [result, setResult] = useState<CalculationResult | null>(null)
+    const [history, setHistory] = useState<HistoryEntry[]>([])
+    const [showHistory, setShowHistory] = useState(false)
+    const [isInitialized, setIsInitialized] = useState(false)
+
+    const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+    const searchParams = useSearchParams()
+
+    // Formatação de números
+    const formatCurrency = (value: number) => {
+        return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }).format(value)
+    }
+
+    const formatPercent = (value: number) => {
+        return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+    }
+
+    const formatCrypto = (value: number) => {
+        // Ajustar casas decimais baseado no valor
+        const decimals = value < 0.01 ? 8 : value < 1 ? 6 : 4
+        return `${value.toFixed(decimals)} crypto`
+    }
+
+    // Carregar estados salvos do localStorage na inicialização
+    useEffect(() => {
+        const savedState = localStorage.getItem(STORAGE_KEY)
+        if (savedState) {
+            try {
+                const parsed = JSON.parse(savedState)
+                if (parsed.mode) setMode(parsed.mode === "btc" ? "crypto" : parsed.mode)
+                if (parsed.cryptoAmount !== undefined) setCryptoAmount(parsed.cryptoAmount)
+                if (parsed.usdAmount !== undefined) setUsdAmount(parsed.usdAmount)
+                if (parsed.buyPrice !== undefined) setBuyPrice(parsed.buyPrice)
+                if (parsed.sellPrice !== undefined) setSellPrice(parsed.sellPrice)
+                if (parsed.buyFeePercent !== undefined) setBuyFeePercent(parsed.buyFeePercent)
+                if (parsed.sellFeePercent !== undefined) setSellFeePercent(parsed.sellFeePercent)
+            } catch (err) {
+                console.error("Erro ao carregar estado salvo", err)
+            }
+        }
+        setIsInitialized(true)
+    }, [])
+
+    // Salvar estados no localStorage sempre que mudarem (após inicialização)
+    useEffect(() => {
+        if (!isInitialized) return // Não salvar durante a inicialização
+        
+        const stateToSave = {
+            mode,
+            cryptoAmount,
+            usdAmount,
+            buyPrice,
+            sellPrice,
+            buyFeePercent,
+            sellFeePercent,
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave))
+    }, [isInitialized, mode, cryptoAmount, usdAmount, buyPrice, sellPrice, buyFeePercent, sellFeePercent])
+
+    // Carregar histórico do localStorage
+    useEffect(() => {
+        const savedHistory = localStorage.getItem('crypto-calc-history')
+        if (savedHistory) {
+            try {
+                const parsed = JSON.parse(savedHistory)
+                // Migrar histórico antigo
+                const migrated = parsed.map((entry: any) => ({
+                    ...entry,
+                    cryptoAmount: entry.cryptoAmount ?? entry.btcAmount ?? 0,
+                    mode: entry.mode === "btc" ? "crypto" : entry.mode,
+                }))
+                setHistory(migrated)
+            } catch (err) {
+                console.error("Erro ao carregar histórico", err)
+            }
+        }
+    }, [])
+
+    // Salvar histórico no localStorage
+    useEffect(() => {
+        if (history.length > 0) {
+            localStorage.setItem('crypto-calc-history', JSON.stringify(history.slice(-10))) // Últimos 10
+        }
+    }, [history])
+
+    const calculateFromState = useCallback((state: CalculatorState) => {
+        const amountCrypto =
+            state.mode === "crypto" || state.mode === "btc"
+                ? (state.cryptoAmount ?? state.btcAmount ?? 0)
+                : (state.usdAmount / state.buyPrice) * (1 - (state.buyFeePercent ?? 0.1) * 0.01)
+
+        const buyValue = amountCrypto * state.buyPrice
+        const buyFee = buyValue * ((state.buyFeePercent ?? state.feePercent ?? 0.1) * 0.01)
+        const buyTotal = buyValue + buyFee
+
+        const sellValue = amountCrypto * state.sellPrice
+        const sellFee = sellValue * ((state.sellFeePercent ?? state.feePercent ?? 0.1) * 0.01)
+        const sellNet = sellValue - sellFee
+
+        const profitGross = sellValue - buyValue
+        const profitNet = sellNet - buyTotal
+        const returnOnInvestment = buyTotal > 0 ? (profitNet / buyTotal) * 100 : 0
+
+        const calculationResult: CalculationResult = {
+            cryptoAmount: amountCrypto,
+            btc: amountCrypto, // Compatibilidade
+            buyValue,
+            buyFee,
+            buyTotal,
+            sellValue,
+            sellFee,
+            sellNet,
+            profitGross,
+            profitNet,
+            returnOnInvestment,
+        }
+
+        setResult(calculationResult)
+        return calculationResult
+    }, [])
+
+    // Carregar estado compartilhado da URL
+    useEffect(() => {
+        const shared = searchParams.get("share")
+        if (shared) {
+            try {
+                const decoded: CalculatorState = JSON.parse(atob(shared))
+                const normalizedState: CalculatorState = {
+                    ...decoded,
+                    cryptoAmount: decoded.cryptoAmount ?? decoded.btcAmount ?? 0.1,
+                    mode: decoded.mode === "btc" ? "crypto" : decoded.mode || "crypto",
+                }
+                setMode(normalizedState.mode === "btc" ? "crypto" : normalizedState.mode)
+                setCryptoAmount(normalizedState.cryptoAmount ?? 0.1)
+                setUsdAmount(normalizedState.usdAmount)
+                setBuyPrice(normalizedState.buyPrice)
+                setSellPrice(normalizedState.sellPrice)
+                setBuyFeePercent(normalizedState.buyFeePercent ?? normalizedState.feePercent ?? 0.1)
+                setSellFeePercent(normalizedState.sellFeePercent ?? normalizedState.feePercent ?? 0.1)
+                calculateFromState(normalizedState)
+            } catch (err) {
+                console.error("Erro ao decodificar URL compartilhada", err)
+            }
+        }
+    }, [searchParams, calculateFromState])
+
+    const throttledCalculate = useCallback(() => {
+        if (throttleTimeoutRef.current) {
+            clearTimeout(throttleTimeoutRef.current)
+        }
+
+        throttleTimeoutRef.current = setTimeout(() => {
+            const isValid =
+                buyPrice > 0 &&
+                sellPrice > 0 &&
+                ((mode === "crypto" && cryptoAmount > 0) || (mode === "usd" && usdAmount > 0))
+
+            if (isValid) {
+                const state: CalculatorState = {
+                    mode,
+                    cryptoAmount,
+                    usdAmount,
+                    buyPrice,
+                    sellPrice,
+                    buyFeePercent,
+                    sellFeePercent,
+                }
+                const calculationResult = calculateFromState(state)
+
+                // Adicionar ao histórico
+                setHistory((prev) => [
+                    {
+                        ...state,
+                        result: calculationResult,
+                        timestamp: Date.now(),
+                    },
+                    ...prev.slice(0, 9), // Manter apenas os últimos 10
+                ])
+            } else {
+                setResult(null)
+            }
+        }, 300)
+    }, [mode, cryptoAmount, usdAmount, buyPrice, sellPrice, buyFeePercent, sellFeePercent, calculateFromState])
+
+    useEffect(() => {
+        throttledCalculate()
+        return () => {
+            if (throttleTimeoutRef.current) {
+                clearTimeout(throttleTimeoutRef.current)
+            }
+        }
+    }, [throttledCalculate])
+
+    const shareUrl = () => {
+        const state: CalculatorState = {
+            mode,
+            cryptoAmount,
+            usdAmount,
+            buyPrice,
+            sellPrice,
+            buyFeePercent,
+            sellFeePercent,
+        }
+        const encoded = btoa(JSON.stringify(state))
+        const url = `${window.location.origin}${window.location.pathname}?share=${encoded}`
+        navigator.clipboard.writeText(url).then(() => {
+            // Melhor feedback visual
+            const button = document.activeElement as HTMLElement
+            const originalText = button.textContent
+            button.textContent = "✓ Link copiado!"
+            setTimeout(() => {
+                button.textContent = originalText
+            }, 2000)
+        })
+    }
+
+    const swapPrices = () => {
+        const temp = buyPrice
+        setBuyPrice(sellPrice)
+        setSellPrice(temp)
+    }
+
+    const loadFromHistory = (entry: HistoryEntry) => {
+        setMode(entry.mode === "btc" ? "crypto" : entry.mode)
+        setCryptoAmount(entry.cryptoAmount ?? entry.btcAmount ?? 0)
+        setUsdAmount(entry.usdAmount)
+        setBuyPrice(entry.buyPrice)
+        setSellPrice(entry.sellPrice)
+        setBuyFeePercent(entry.buyFeePercent ?? entry.feePercent ?? 0.1)
+        setSellFeePercent(entry.sellFeePercent ?? entry.feePercent ?? 0.1)
+        setResult(entry.result)
+        setShowHistory(false)
+    }
+
+    const clearHistory = () => {
+        setHistory([])
+        localStorage.removeItem('crypto-calc-history')
+    }
+
+    const isValid = useMemo(() => {
+        return (
+            buyPrice > 0 &&
+            sellPrice > 0 &&
+            ((mode === "crypto" && cryptoAmount > 0) || (mode === "usd" && usdAmount > 0))
+        )
+    }, [mode, cryptoAmount, usdAmount, buyPrice, sellPrice])
+
+    return (
+        <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center px-4 pb-4">
+            <footer className="text-sm text-neutral-500 my-6 text-center">
+                Criado por <a href="https://www.linkedin.com/in/andersonbosa/" target="_blank" className="underline hover:text-white">Anderson Bosa</a>
+            </footer>
+            <Card className="w-full max-w-2xl p-6 bg-neutral-900 border border-neutral-800 shadow-xl rounded-2xl">
+                <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-semibold">Calculadora de Lucro Criptomoedas</h2>
+                    {history.length > 0 && (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setShowHistory(!showHistory)}
+                                    className="text-neutral-400 hover:text-white"
+                                >
+                                    <History className="w-4 h-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                Ver histórico de cálculos
+                            </TooltipContent>
+                        </Tooltip>
+                    )}
+                </div>
+
+                <AnimatePresence>
+                    {showHistory && history.length > 0 && (
+                        <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="mb-6 p-4 bg-neutral-800 rounded-lg border border-neutral-700"
+                        >
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-sm font-semibold">Histórico</h3>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={clearHistory}
+                                    className="text-xs text-neutral-400 hover:text-white h-6"
+                                >
+                                    Limpar
+                                </Button>
+                            </div>
+                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                {history.map((entry, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => loadFromHistory(entry)}
+                                        className="w-full text-left p-2 rounded hover:bg-neutral-700 transition-colors text-xs"
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-neutral-300">
+                                                {entry.mode === "crypto" || entry.mode === "btc" 
+                                                    ? `${(entry.cryptoAmount ?? entry.btcAmount ?? 0).toFixed(4)} crypto`
+                                                    : formatCurrency(entry.usdAmount)}
+                                            </span>
+                                            <span className={entry.result.profitNet >= 0 ? "text-green-400" : "text-red-400"}>
+                                                {formatCurrency(entry.result.profitNet)}
+                                            </span>
+                                        </div>
+                                        <div className="text-neutral-500 text-xs mt-1">
+                                            {new Date(entry.timestamp).toLocaleString('pt-BR')}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                <RadioGroup
+                    value={mode}
+                    onValueChange={(value) => setMode(value as "crypto" | "usd")}
+                    className="flex justify-center gap-6 mb-6"
+                >
+                    <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="crypto" id="r1" />
+                        <Label htmlFor="r1">Valor Inicial em Crypto</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="usd" id="r2" />
+                        <Label htmlFor="r2">Valor Inicial em USD</Label>
+                    </div>
+                </RadioGroup>
+
+                <div className="grid gap-4">
+                    {mode === "crypto" ? (
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Label>Valor Inicial em Crypto</Label>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <HelpCircle className="w-3 h-3 text-neutral-400 cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        Você já possui essa quantidade de crypto e quer simular uma venda.
+                                    </TooltipContent>
+                                </Tooltip>
+                            </div>
+                            <Input
+                                placeholder="Ex: 0.015"
+                                type="number"
+                                value={cryptoAmount || ""}
+                                onChange={(e) => setCryptoAmount(parseFloat(e.target.value) || 0)}
+                                min={0}
+                                step={0.00001}
+                                className="bg-neutral-800 border-neutral-700"
+                            />
+                        </div>
+                    ) : (
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Label>Valor Inicial em USD</Label>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <HelpCircle className="w-3 h-3 text-neutral-400 cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        Você comprará crypto com esse valor e simulará a venda.
+                                    </TooltipContent>
+                                </Tooltip>
+                            </div>
+                            <Input
+                                placeholder="Ex: 1500"
+                                type="number"
+                                value={usdAmount || ""}
+                                onChange={(e) => setUsdAmount(parseFloat(e.target.value) || 0)}
+                                min={0}
+                                step={0.01}
+                                className="bg-neutral-800 border-neutral-700"
+                            />
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <Label>Preço de Compra (USD)</Label>
+                            <Input
+                                placeholder="Ex: 95000"
+                                type="number"
+                                value={buyPrice || ""}
+                                onChange={(e) => setBuyPrice(parseFloat(e.target.value) || 0)}
+                                min={0}
+                                step={0.01}
+                                className="bg-neutral-800 border-neutral-700"
+                            />
+                        </div>
+                        <div>
+                            <Label>Preço de Venda (USD)</Label>
+                            <Input
+                                placeholder="Ex: 99000"
+                                type="number"
+                                value={sellPrice || ""}
+                                onChange={(e) => setSellPrice(parseFloat(e.target.value) || 0)}
+                                min={0}
+                                step={0.01}
+                                className="bg-neutral-800 border-neutral-700"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex justify-center">
+                        <Button variant="ghost" size="sm" onClick={swapPrices} className="text-neutral-400 hover:text-white flex items-center gap-1">
+                            <Repeat className="w-4 h-4" /> Inverter preços
+                        </Button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Label>Taxa de Compra (%)</Label>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <HelpCircle className="w-3 h-3 text-neutral-400 cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        Taxa cobrada pela corretora na compra de crypto.
+                                    </TooltipContent>
+                                </Tooltip>
+                            </div>
+                            <Input
+                                placeholder="Ex: 0.1"
+                                type="number"
+                                value={buyFeePercent || ""}
+                                onChange={(e) => setBuyFeePercent(parseFloat(e.target.value) || 0)}
+                                min={0}
+                                step={0.01}
+                                className="bg-neutral-800 border-neutral-700"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Label>Taxa de Venda (%)</Label>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <HelpCircle className="w-3 h-3 text-neutral-400 cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        Taxa cobrada pela corretora na venda de crypto.
+                                    </TooltipContent>
+                                </Tooltip>
+                            </div>
+                            <Input
+                                placeholder="Ex: 0.1"
+                                type="number"
+                                value={sellFeePercent || ""}
+                                onChange={(e) => setSellFeePercent(parseFloat(e.target.value) || 0)}
+                                min={0}
+                                step={0.01}
+                                className="bg-neutral-800 border-neutral-700"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6">
+                    <Button
+                        onClick={throttledCalculate}
+                        disabled={!isValid}
+                        className="w-full sm:w-auto"
+                    >
+                        Calcular Lucro
+                    </Button>
+                    <Button variant="secondary" onClick={shareUrl} className="flex items-center gap-2 w-full sm:w-auto">
+                        <Share2 className="w-4 h-4" /> Compartilhar
+                    </Button>
+                </div>
+
+                <AnimatePresence>
+                    {result && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 20 }}
+                            transition={{ duration: 0.3 }}
+                        >
+                            <CardContent className="mt-8 space-y-4 text-sm bg-neutral-800 rounded-lg p-6 border border-neutral-700">
+                                <div className="text-center text-2xl font-semibold mb-4">
+                                    {result.profitNet >= 0 ? (
+                                        <div className="text-green-400 flex items-center justify-center gap-2">
+                                            <TrendingUp className="w-6 h-6" />
+                                            {formatCurrency(result.profitNet)} de lucro líquido
+                                        </div>
+                                    ) : (
+                                        <div className="text-red-400 flex items-center justify-center gap-2">
+                                            <TrendingDown className="w-6 h-6" />
+                                            {formatCurrency(result.profitNet)} de prejuízo
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3 border-t pt-4 border-neutral-700">
+                                    <span className="text-neutral-400">Crypto negociado:</span>
+                                    <span className="font-medium">{formatCrypto(result.cryptoAmount)}</span>
+
+                                    <span className="text-neutral-400">Valor de compra:</span>
+                                    <span>{formatCurrency(result.buyValue)}</span>
+
+                                    <span className="text-neutral-400">Taxa de compra:</span>
+                                    <span className="text-red-400">-{formatCurrency(result.buyFee)}</span>
+
+                                    <span className="text-neutral-400">Total investido:</span>
+                                    <span className="font-semibold">{formatCurrency(result.buyTotal)}</span>
+
+                                    <span className="text-neutral-400">Valor de venda:</span>
+                                    <span>{formatCurrency(result.sellValue)}</span>
+
+                                    <span className="text-neutral-400">Taxa de venda:</span>
+                                    <span className="text-red-400">-{formatCurrency(result.sellFee)}</span>
+
+                                    <span className="text-neutral-400">Receita líquida:</span>
+                                    <span className="font-semibold">{formatCurrency(result.sellNet)}</span>
+
+                                    <span className="text-neutral-400">Lucro bruto:</span>
+                                    <span className={result.profitGross >= 0 ? "text-green-400" : "text-red-400"}>
+                                        {formatCurrency(result.profitGross)}
+                                    </span>
+
+                                    <span className="text-neutral-400">ROI:</span>
+                                    <span className={`font-semibold ${result.returnOnInvestment >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                        {formatPercent(result.returnOnInvestment)}
+                                    </span>
+                                </div>
+                            </CardContent>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </Card>
+        </div>
+    )
+}

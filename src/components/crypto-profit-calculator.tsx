@@ -183,14 +183,35 @@ export function ProfitCalculator() {
     const calculateFromState = useCallback((state: CalculatorState) => {
         // Suportar modos antigos e novo modo
         const isQuantityMode = state.mode === "quantity" || state.mode === "crypto" || state.mode === "btc"
-        const amount =
-            isQuantityMode
-                ? (state.quantity ?? state.cryptoAmount ?? state.btcAmount ?? 0)
-                : (state.usdAmount / state.buyPrice) * (1 - (state.buyFeePercent ?? 0.1) * 0.01)
+        
+        let amount: number
+        let buyValue: number
+        let buyFee: number
+        let buyTotal: number
 
-        const buyValue = amount * state.buyPrice
-        const buyFee = buyValue * ((state.buyFeePercent ?? state.feePercent ?? 0.1) * 0.01)
-        const buyTotal = buyValue + buyFee
+        if (isQuantityMode) {
+            // Modo quantidade: usuário já tem a quantidade do ativo
+            amount = state.quantity ?? state.cryptoAmount ?? state.btcAmount ?? 0
+            buyValue = amount * state.buyPrice
+            buyFee = buyValue * ((state.buyFeePercent ?? state.feePercent ?? 0.1) * 0.01)
+            buyTotal = buyValue + buyFee
+        } else {
+            // Modo USD: usuário tem um valor em USD para investir
+            // Primeiro calculamos quantas unidades podemos comprar com o valor disponível
+            // Considerando que a taxa será cobrada sobre o valor total
+            // buyTotal = buyValue + buyFee
+            // buyTotal = buyValue + (buyValue * feePercent)
+            // buyTotal = buyValue * (1 + feePercent)
+            // buyValue = buyTotal / (1 + feePercent)
+            // Como buyValue = amount * buyPrice e temos buyTotal = usdAmount:
+            // amount * buyPrice = usdAmount / (1 + feePercent)
+            // amount = usdAmount / (buyPrice * (1 + feePercent))
+            const feePercent = (state.buyFeePercent ?? state.feePercent ?? 0.1) * 0.01
+            amount = state.usdAmount / (state.buyPrice * (1 + feePercent))
+            buyValue = amount * state.buyPrice
+            buyFee = buyValue * feePercent
+            buyTotal = buyValue + buyFee
+        }
 
         const sellValue = amount * state.sellPrice
         const sellFee = sellValue * ((state.sellFeePercent ?? state.feePercent ?? 0.1) * 0.01)
